@@ -146,6 +146,32 @@ func Ping(ctx context.Context, proxyAddr string, insecure bool, pool *x509.CertP
 	return pr, nil
 }
 
+// GetClusterCA
+func GetClusterCA(ctx context.Context, proxyAddr string, insecure bool) (*ClusterCAResponse, error) {
+	clt := newWebClient(insecure, nil)
+	defer clt.CloseIdleConnections()
+
+	endpoint := fmt.Sprintf("https://%s/webapi/clusterca", proxyAddr)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	resp, err := doWithFallback(clt, insecure, req)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	defer resp.Body.Close()
+	cr := &ClusterCAResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(cr); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return cr, nil
+}
+
 // GetTunnelAddr returns the tunnel address either set in an environment variable or retrieved from the web proxy.
 func GetTunnelAddr(ctx context.Context, proxyAddr string, insecure bool, pool *x509.CertPool) (string, error) {
 	// If TELEPORT_TUNNEL_PUBLIC_ADDR is set, nothing else has to be done, return it.
@@ -325,6 +351,13 @@ type GithubSettings struct {
 	Name string `json:"name"`
 	// Display is the connector display name
 	Display string `json:"display"`
+}
+
+type ClusterCAResponse struct {
+	// ClusterName is the name of the local Teleport cluster.
+	ClusterName string `json:"cluster_name"`
+	// ClusterCAs is the PEM-encoding of TLS CAs for the local Teleport cluster.
+	ClusterCAs []byte `json:"cluster_cas"`
 }
 
 // The tunnel addr is retrieved in the following preference order:
