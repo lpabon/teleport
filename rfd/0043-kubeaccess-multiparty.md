@@ -211,13 +211,16 @@ The resource has been modeled after the resource for access requests. Below foll
 declaration of the proposed resource.
 
 ```protobuf
-// KubernetesSessionRequestSpecV3 is the specification for a request for session participants resource.
-message KubernetesSessionRequestSpecV3 {
-    // SessionID is unique identifier of the session after 
+// SessionRequestSpecV3 is the specification for a request for session participants resource.
+message SessionRequestSpecV3 {
+    // SessionID is unique identifier of the session this request is tied to.
     string SessionID = 1 [ (gogoproto.jsontag) = "user" ];
 
+    // Type describes what type of session this request is for.
+    SessionType Type = 2 [ (gogoproto.jsontag) = "type" ];
+
     // State is the current state of this session request.
-    KubernetesSessionRequestState State = 3 [ (gogoproto.jsontag) = "state,omitempty" ];
+    SessionRequestState State = 3 [ (gogoproto.jsontag) = "state,omitempty" ];
 
     // Created encodes the time at which the request was registered with the auth
     // server.
@@ -228,23 +231,31 @@ message KubernetesSessionRequestSpecV3 {
     ];
 
     // Expires encodes the time at which this session participant request expires and becomes invalid.
-    google.protobuf.Timestamp Expires = 4 [
+    google.protobuf.Timestamp Expires = 5 [
         (gogoproto.stdtime) = true,
         (gogoproto.nullable) = false,
         (gogoproto.jsontag) = "expires,omitempty"
     ];
 
+    // AttachedData is arbitrary attached JSON serialized metadata.
+    string AttachedData = 6 [ (gogoproto.jsontag) = "state,omitempty" ];
+
     // RequestReason is an optional message explaining the reason for the request.
-    string RequestReason = 6 [ (gogoproto.jsontag) = "request_reason,omitempty" ];
+    string RequestReason = 7 [ (gogoproto.jsontag) = "request_reason,omitempty" ];
 
     // SuggestedReviewers is a list of reviewer suggestions.  These can be teleport usernames, but
     // that is not a requirement.
-    repeated string SuggestedReviewers = 13
+    repeated string SuggestedReviewers = 8
         [ (gogoproto.jsontag) = "suggested_reviewers,omitempty" ];
 }
 
-// KubernetesSessionRequestState represents the state of a request for escalated privilege.
-enum KubernetesSessionRequestState {
+enum SessionType {
+    NONE = 0;
+    KUBERNETES = 1;
+}
+
+// SessionRequestState represents the state of a request for escalated privilege.
+enum SessionRequestState {
     // PENDING variant represents a session that is waiting on participants to fulfill the criteria
     // to start the session.
     PENDING = 0;
