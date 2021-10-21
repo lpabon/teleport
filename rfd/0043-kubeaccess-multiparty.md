@@ -130,6 +130,21 @@ To make this process easier for the user. I propose extending the current `tsh j
 to also work for Kubernetes access in the form of `tsh kube join <session-id>`. This attaches
 to an ongoing session and displays stdout/stderr.
 
+##### MFA tap
+
+If the `require_mfa_tap` option is enabled then MFA tap input via Yubikey or other is required for the participant to be considered active.
+This requirement is on an interval of 1 minute. When there is 15 seconds left, an alert is printed to the console.
+
+```
+Teleport >> Please tap your MFA key within 15 seconds.
+```
+
+If tap is made after the alert, the follwing message is shown:
+
+```
+Teleport >> MFA tap received.
+```
+
 ##### Example
 
 This example illustrates how a group 3 users of which Alice is the initiator and Eve and Ben are two observers
@@ -279,11 +294,13 @@ spec:
         kinds: ['k8s', 'ssh']
         modes: ['moderator']
         count: 1
+        require_mfa_tap: true
       - name: Dual dev oversight
         filter: 'contains(observer.roles,"dev")'
         kinds: ['k8s', 'ssh']
         modes: ['moderator']
         count: 2
+        require_mfa_tap: true
 ```
 
 ```yaml
@@ -311,6 +328,7 @@ spec:
         kinds: ['ssh']
         modes: ['moderator']
         count: 1
+        require_mfa_tap: true
 ```
 
 ```yaml
