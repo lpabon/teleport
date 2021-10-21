@@ -237,8 +237,8 @@ message SessionRequestSpecV3 {
         (gogoproto.jsontag) = "expires,omitempty"
     ];
 
-    // AttachedData is arbitrary attached JSON serialized metadata.
-    string AttachedData = 6 [ (gogoproto.jsontag) = "state,omitempty" ];
+    // AttachedData is arbitrary attached JSON serialized metadata.$
+    string AttachedData = 6 [ (gogoproto.jsontag) = "attached,omitempty" ];
 
     // RequestReason is an optional message explaining the reason for the request.
     string RequestReason = 7 [ (gogoproto.jsontag) = "request_reason,omitempty" ];
@@ -249,8 +249,12 @@ message SessionRequestSpecV3 {
         [ (gogoproto.jsontag) = "suggested_reviewers,omitempty" ];
 }
 
+// SessionType encodes different types of sessions.
 enum SessionType {
+    // NONE is a placeholder variant and isn't valid.
     NONE = 0;
+
+    // KUBERNETES means a session initiated via Kubernetes Access.
     KUBERNETES = 1;
 }
 
