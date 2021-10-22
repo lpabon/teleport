@@ -118,8 +118,9 @@ Terminating the session from a observer `tsh` instance can be done with the key 
 
 ##### Session creation
 
-Session creation UX is unmodified and happens as usual via `kubectl exec`.
-A session UUID is displayed when executing `kubectl exec` which allows others to connect.
+Session creation can happen with the existing flow using `kubectl exec`
+but the wrapper command `tsh kube exec --invite=bob@example.com,eve@foo.net --reason="Need to fix this pod" -- database_pod -- /bin/bash`. This subcommand allows you to invite one or more accounts which will receive a notification saying they are invited. An arbitrary string may also be provided as a reason
+for the session invite, it could for example be used to say what the purpose of the session is.
 
 ##### Session join
 
@@ -151,7 +152,7 @@ This example illustrates how a group 3 users of which Alice is the initiator and
 start a multiparty session. Below is a a series of events that happen that include what each user sees and what
 they do.
 
-- Alice initiates an interactive session to a pod: `kubectl exec -it database -- sh`
+- Alice initiates an interactive session to a pod: `tsh kube exec --invite=ben@foo.net,eve@foo.net,alice@foo.net -- database_pod -- /bin/bash`
 - Alice sees:
 ```
 Creating session with uuid <example-uuid>...
