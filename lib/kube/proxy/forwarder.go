@@ -45,11 +45,12 @@ import (
 	"github.com/gravitational/teleport/lib/labels"
 	"github.com/gravitational/teleport/lib/reversetunnel"
 	"github.com/gravitational/teleport/lib/services"
-	"github.com/gravitational/teleport/lib/session"
+	libsession "github.com/gravitational/teleport/lib/session"
 	"github.com/gravitational/teleport/lib/srv"
 	"github.com/gravitational/teleport/lib/sshca"
 	"github.com/gravitational/teleport/lib/utils"
 
+	"github.com/google/uuid"
 	"github.com/gravitational/oxy/forward"
 	fwdutils "github.com/gravitational/oxy/utils"
 	"github.com/gravitational/trace"
@@ -234,6 +235,7 @@ func NewForwarder(cfg ForwarderConfig) (*Forwarder, error) {
 		activeRequests:    make(map[string]context.Context),
 		ctx:               closeCtx,
 		close:             close,
+		sessions:          make(map[uuid.UUID]*Session),
 	}
 
 	fwd.router.POST("/api/:ver/namespaces/:podNamespace/pods/:podName/exec", fwd.withAuth(fwd.exec))
@@ -273,9 +275,11 @@ type Forwarder struct {
 	close context.CancelFunc
 	// ctx is a global context signalling exit
 	ctx context.Context
-	// creds contain kubernetes credentials for multiple clusters.
+	// creds contain kubernetes credestials for multiple clusters.
 	// map key is cluster name.
 	creds map[string]*kubeCreds
+	// sessions tracks active interactive sessions
+	sessions map[uuid.UUID]*Session
 }
 
 // Close signals close to all outstanding or background operations
@@ -699,6 +703,17 @@ func (f *Forwarder) newStreamer(ctx *authContext) (events.Streamer, error) {
 	return events.NewTeeStreamer(fileStreamer, f.cfg.StreamEmitter), nil
 }
 
+func trimLeftChars(s string, n int) string {
+	m := 0
+	for i := range s {
+		if m >= n {
+			return s[i:]
+		}
+		m++
+	}
+	return s[:0]
+}
+
 // exec forwards all exec requests to the target server, captures
 // all output from the session
 func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Request, p httprouter.Params) (resp interface{}, err error) {
@@ -708,6 +723,31 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 			f.log.WithError(err).Debug("Exec request failed")
 		}
 	}()
+
+	participant := &Participant{
+		Context: ctx,
+	}
+
+	if strings.HasPrefix(p.ByName("podName"), "uuid") {
+		uuidString := trimLeftChars(p.ByName("podName"), 4)
+		uuid, err := uuid.Parse(uuidString)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+
+		f.mu.Lock()
+		session := f.sessions[uuid]
+		f.mu.Unlock()
+		session.WaitOnStart(participant)
+
+		// TODO(joel): attach multiplexer here
+	}
+
+	session := NewSession(participant)
+	f.mu.Lock()
+	f.sessions[session.uuid] = session
+	f.mu.Unlock()
+	session.WaitOnStart(participant)
 
 	sess, err := f.newClusterSession(*ctx)
 	if err != nil {
@@ -737,7 +777,6 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 
 	var recorder events.SessionRecorder
 	var emitter apievents.Emitter
-	sessionID := session.NewID()
 	if sess.noAuditEvents {
 		// All events should be recorded by kubernetes_service and not proxy_service
 		emitter = events.NewDiscardEmitter()
@@ -757,7 +796,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 			Context:      f.ctx,
 			Streamer:     streamer,
 			Clock:        f.cfg.Clock,
-			SessionID:    sessionID,
+			SessionID:    libsession.ID(session.uuid.String()),
 			ServerID:     f.cfg.ServerID,
 			Namespace:    f.cfg.Namespace,
 			RecordOutput: ctx.recordingConfig.GetMode() != types.RecordOff,
@@ -770,7 +809,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		emitter = recorder
 		defer recorder.Close(f.ctx)
 		request.onResize = func(resize remotecommand.TerminalSize) {
-			params := session.TerminalParams{
+			params := libsession.TerminalParams{
 				W: int(resize.Width),
 				H: int(resize.Height),
 			}
@@ -789,7 +828,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 					ServerNamespace: f.cfg.Namespace,
 				},
 				SessionMetadata: apievents.SessionMetadata{
-					SessionID: string(sessionID),
+					SessionID: session.uuid.String(),
 					WithMFA:   ctx.Identity.GetIdentity().MFAVerified,
 				},
 				UserMetadata: apievents.UserMetadata{
@@ -815,7 +854,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 	if request.tty {
 		// Emit "new session created" event. There are no initial terminal
 		// parameters per k8s protocol, so set up with any default
-		termParams := session.TerminalParams{
+		termParams := libsession.TerminalParams{
 			W: 100,
 			H: 100,
 		}
@@ -832,7 +871,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 				ServerAddr:      sess.teleportCluster.targetAddr,
 			},
 			SessionMetadata: apievents.SessionMetadata{
-				SessionID: string(sessionID),
+				SessionID: session.uuid.String(),
 				WithMFA:   ctx.Identity.GetIdentity().MFAVerified,
 			},
 			UserMetadata: apievents.UserMetadata{
@@ -914,7 +953,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 					ServerNamespace: f.cfg.Namespace,
 				},
 				SessionMetadata: apievents.SessionMetadata{
-					SessionID: string(sessionID),
+					SessionID: session.uuid.String(),
 					WithMFA:   ctx.Identity.GetIdentity().MFAVerified,
 				},
 				UserMetadata: apievents.UserMetadata{
@@ -946,7 +985,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 					ServerNamespace: f.cfg.Namespace,
 				},
 				SessionMetadata: apievents.SessionMetadata{
-					SessionID: string(sessionID),
+					SessionID: session.uuid.String(),
 					WithMFA:   ctx.Identity.GetIdentity().MFAVerified,
 				},
 				UserMetadata: apievents.UserMetadata{
@@ -984,7 +1023,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 					ServerNamespace: f.cfg.Namespace,
 				},
 				SessionMetadata: apievents.SessionMetadata{
-					SessionID: string(sessionID),
+					SessionID: session.uuid.String(),
 					WithMFA:   ctx.Identity.GetIdentity().MFAVerified,
 				},
 				UserMetadata: apievents.UserMetadata{
