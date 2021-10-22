@@ -49,8 +49,7 @@ in the event of severe error or malice and have the ability to halt any erroneou
 
 #### Session states
 
-By default, a `kubectl exec` and `kubectl attach` request will go through if no policies are defined.
-If a policy like the one above is defined the session will be put in a pending state
+By default, a `tsh kube exec` and `kubectl attach` request will go through as usual if no policies are defined. If a policy like the one above is defined the session will be put in a pending state
 until the required viewers have joined.
 
 Sessions can have 3 possible states:
