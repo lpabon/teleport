@@ -132,7 +132,7 @@ to an ongoing session and displays stdout/stderr.
 
 ##### MFA tap
 
-If the `require_mfa_tap` option is enabled then MFA tap input via Yubikey or other is required for the participant to be considered active.
+If the standard `per_session_mfa` option is enabled for a role then MFA tap input via Yubikey or other is required for the participant to be considered active.
 This requirement is on an interval of 1 minute. When there is 15 seconds left, an alert is printed to the console.
 
 ```
