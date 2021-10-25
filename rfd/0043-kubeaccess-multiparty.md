@@ -186,43 +186,36 @@ Events:
 ```
 - The connection to the pod is made and each the session turns into a normal shell.
 
-#### Participant requests
+#### Session invites and notifications
 
-Shared sessions for Kubernetes access will have support for participant requests.
-A participant request may be created in the `PENDING` session state by a session participant interactively.
+Shared sessions for Kubernetes access will have support for participant invites and notifications.
+Ongoing sessions are tracked and can be listed to make it easier to find and join them.
 
-This creates a resource that can be seen by eligible session participants with `tsh kube requests ls`.
-This easily allows eligible participants to find and join a session waiting for participants.
+Ongoing sessions you have access to view can be listed with `tsh kube sessions ls`.
+This easily allows eligible participants to find and join a session waiting for participants easily
 
-A request may also be created for an existing session via `tsh kube requests create <session-id>`.
-It will have an optional flag for suggested participants: `tsh kube requests create <session-id> --invite user1,user2,user3`.
+When the `--invite` flag is used with `tsh kube exec`, the invitees are tracked and included in the
+session resource which allows Teleport clients and plugins to detect notify them.
 
-The request is associated with the same ID as that of the session which makes these notifications
-resources work seamlessly with `tsh kube join`
+##### Session resource
 
-An optional reason flag also exists which allows you to attach an arbitrary message to the participant request: `tsh kube requests create <session-id> --reason "customer db maintenance"`.
-
-A resource will be created which will support interaction with existing plugins for notifiying relevant
-groups when a request is created similar to notifications for access requests.
-
-##### Request resource
-
-The resource has been modeled after the resource for access requests. Below follows the protobuf
-declaration of the proposed resource.
+There currently isn't a general purpose session resource in Teleport that's suitable.
+therefore I suggest that this shall be added. This will be initially used for tracking Kubernetes
+sessions but is compatible with all current and future session types.
 
 ```protobuf
-// SessionRequestSpecV3 is the specification for a request for session participants resource.
-message SessionRequestSpecV3 {
-    // SessionID is unique identifier of the session this request is tied to.
+// SessionSpecV3 is the specification for a live session.
+message SessionSpecV3 {
+    // SessionID is unique identifier of this session.
     string SessionID = 1 [ (gogoproto.jsontag) = "user" ];
 
-    // Type describes what type of session this request is for.
+    // Type describes what type of session this is.
     SessionType Type = 2 [ (gogoproto.jsontag) = "type" ];
 
-    // State is the current state of this session request.
-    SessionRequestState State = 3 [ (gogoproto.jsontag) = "state,omitempty" ];
+    // State is the current state of this session.
+    SessionState State = 3 [ (gogoproto.jsontag) = "state,omitempty" ];
 
-    // Created encodes the time at which the request was registered with the auth
+    // Created encodes the time at which the session was registered with the auth
     // server.
     google.protobuf.Timestamp Created = 4 [
         (gogoproto.stdtime) = true,
@@ -230,23 +223,23 @@ message SessionRequestSpecV3 {
         (gogoproto.jsontag) = "created,omitempty"
     ];
 
-    // Expires encodes the time at which this session participant request expires and becomes invalid.
+    // Expires encodes the time at which this session expires and becomes invalid.
     google.protobuf.Timestamp Expires = 5 [
         (gogoproto.stdtime) = true,
         (gogoproto.nullable) = false,
         (gogoproto.jsontag) = "expires,omitempty"
     ];
 
-    // AttachedData is arbitrary attached JSON serialized metadata.$
+    // AttachedData is arbitrary attached JSON serialized metadata.
     string AttachedData = 6 [ (gogoproto.jsontag) = "attached,omitempty" ];
 
-    // RequestReason is an optional message explaining the reason for the request.
-    string RequestReason = 7 [ (gogoproto.jsontag) = "request_reason,omitempty" ];
+    // Reason is an arbitrary string that may be used to describe the session and/or it's purpose.
+    string Reason = 7 [ (gogoproto.jsontag) = "reason,omitempty" ];
 
-    // SuggestedReviewers is a list of reviewer suggestions.  These can be teleport usernames, but
-    // that is not a requirement.
-    repeated string SuggestedReviewers = 8
-        [ (gogoproto.jsontag) = "suggested_reviewers,omitempty" ];
+    // Invited is a list of invited users, this field is interpreted by different
+    // clients on a best-effort basis and used for delivering notifications to invited users.
+    repeated string Invited = 8
+        [ (gogoproto.jsontag) = "invited,omitempty" ];
 }
 
 // SessionType encodes different types of sessions.
@@ -256,17 +249,23 @@ enum SessionType {
 
     // KUBERNETES means a session initiated via Kubernetes Access.
     KUBERNETES = 1;
+
+    // SSH means a standard SSH session initiated via `tsh` or web.
+    SSH = 2;
 }
 
-// SessionRequestState represents the state of a request for escalated privilege.
-enum SessionRequestState {
+// SessionState represents the state of a session.
+enum SessionState {
     // PENDING variant represents a session that is waiting on participants to fulfill the criteria
     // to start the session.
     PENDING = 0;
 
-    // FULFILLED variant represents a session that has had it's criteria for starting
+    // RUNNING variant represents a session that has had it's criteria for starting
     // fulfilled at least once and has transitioned to a RUNNING state.
-    FULFILLED = 1;
+    RUNNING = 1;
+
+    // TERMINATED variant represents a session that is no longer running and due for removal.
+    TERMINATED = 2;
 }
 ```
 
