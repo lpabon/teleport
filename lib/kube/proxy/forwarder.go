@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"io"
 	mathrand "math/rand"
 	"net"
 	"net/http"
@@ -910,7 +911,15 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		f.log.WithError(err).Warning("Failed creating executor.")
 		return nil, trace.Wrap(err)
 	}
-	streamOptions := proxy.options()
+	//streamOptions := proxy.options()
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+	streamOptions := remotecommand.StreamOptions{
+		Stdin:  stdinR,
+		Stdout: stdoutW,
+		Stderr: stderrW,
+	}
 
 	// Wrap stdin/out/err with data trackers, but keep them as nil if they were
 	// nil. Otherwise, executor will try to use these tracking read/writers
@@ -1057,6 +1066,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		}
 	}()
 
+	go session.Multiplexer().Run(stdinW, stdoutR, stderrR)
 	if err = executor.Stream(streamOptions); err != nil {
 		f.log.WithError(err).Warning("Executor failed while streaming.")
 		return nil, trace.Wrap(err)

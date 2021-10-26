@@ -48,7 +48,7 @@ func NewMultiplexer() *Multiplexer {
 	}
 }
 
-// AddClient takes a set sf client streams and starts multiplexing information to them.
+// AddClient takes a set of client streams and starts multiplexing information to them.
 func (m *Multiplexer) AddClient(stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
