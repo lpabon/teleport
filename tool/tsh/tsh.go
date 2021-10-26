@@ -628,6 +628,8 @@ func Run(args []string, opts ...cliOption) error {
 		err = kube.login.run(&cf)
 	case kube.exec.FullCommand():
 		err = kube.exec.run(&cf)
+	case kube.join.FullCommand():
+		err = kube.join.run(&cf)
 	case proxySSH.FullCommand():
 		err = onProxyCommandSSH(&cf)
 	case proxyDB.FullCommand():

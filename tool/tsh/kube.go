@@ -47,6 +47,7 @@ type kubeCommands struct {
 	ls          *kubeLSCommand
 	login       *kubeLoginCommand
 	exec        *kubeExecCommand
+	join        *kubeJoinCommand
 }
 
 func newKubeCommand(app *kingpin.Application) kubeCommands {
@@ -56,6 +57,7 @@ func newKubeCommand(app *kingpin.Application) kubeCommands {
 		ls:          newKubeLSCommand(kube),
 		login:       newKubeLoginCommand(kube),
 		exec:        newKubeExecCommand(kube),
+		join:        newKubeJoinCommand(kube),
 	}
 	return cmds
 }
@@ -83,6 +85,24 @@ func newKubeExecCommand(parent *kingpin.CmdClause) *kubeExecCommand {
 }
 
 func (c *kubeExecCommand) run(cf *CLIConf) error {
+	return nil
+}
+
+type kubeJoinCommand struct {
+	*kingpin.CmdClause
+	sessionID string
+}
+
+func newKubeJoinCommand(parent *kingpin.CmdClause) *kubeJoinCommand {
+	c := &kubeJoinCommand{
+		CmdClause: parent.Command("join", "Join an existing Kubernetes Access session."),
+	}
+
+	c.Flag("uuid", "The ID of the session to connect to.").Required().StringVar(&c.sessionID)
+	return c
+}
+
+func (c *kubeJoinCommand) run(cf *CLIConf) error {
 	return nil
 }
 
