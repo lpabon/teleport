@@ -911,7 +911,10 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		f.log.WithError(err).Warning("Failed creating executor.")
 		return nil, trace.Wrap(err)
 	}
-	//streamOptions := proxy.options()
+
+	clientOptions := proxy.options()
+	session.Multiplexer().AddClient(clientOptions.Stdin, clientOptions.Stdout, clientOptions.Stderr)
+
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
