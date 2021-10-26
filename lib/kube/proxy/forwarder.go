@@ -715,6 +715,24 @@ func trimLeftChars(s string, n int) string {
 	return s[:0]
 }
 
+func createRemoteCommandRequest(req *http.Request, w http.ResponseWriter, p httprouter.Params, pingPeriod time.Duration) remoteCommandRequest {
+	q := req.URL.Query()
+	return remoteCommandRequest{
+		podNamespace:       p.ByName("podNamespace"),
+		podName:            p.ByName("podName"),
+		containerName:      q.Get("container"),
+		cmd:                q["command"],
+		stdin:              utils.AsBool(q.Get("stdin")),
+		stdout:             utils.AsBool(q.Get("stdout")),
+		stderr:             utils.AsBool(q.Get("stderr")),
+		tty:                utils.AsBool(q.Get("tty")),
+		httpRequest:        req,
+		httpResponseWriter: w,
+		context:            req.Context(),
+		pingPeriod:         pingPeriod,
+	}
+}
+
 // exec forwards all exec requests to the target server, captures
 // all output from the session
 func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Request, p httprouter.Params) (resp interface{}, err error) {
@@ -741,22 +759,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		f.mu.Unlock()
 		session.WaitOnStart(participant)
 
-		q := req.URL.Query()
-		request := remoteCommandRequest{
-			podNamespace:       p.ByName("podNamespace"),
-			podName:            p.ByName("podName"),
-			containerName:      q.Get("container"),
-			cmd:                q["command"],
-			stdin:              utils.AsBool(q.Get("stdin")),
-			stdout:             utils.AsBool(q.Get("stdout")),
-			stderr:             utils.AsBool(q.Get("stderr")),
-			tty:                utils.AsBool(q.Get("tty")),
-			httpRequest:        req,
-			httpResponseWriter: w,
-			context:            req.Context(),
-			pingPeriod:         f.cfg.ConnPingPeriod,
-		}
-
+		request := createRemoteCommandRequest(req, w, p, f.cfg.ConnPingPeriod)
 		proxy, err := createRemoteCommandProxy(request)
 		if err != nil {
 			return nil, trace.Wrap(err)
@@ -786,21 +789,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 	}
 	sessionStart := f.cfg.Clock.Now().UTC()
 
-	q := req.URL.Query()
-	request := remoteCommandRequest{
-		podNamespace:       p.ByName("podNamespace"),
-		podName:            p.ByName("podName"),
-		containerName:      q.Get("container"),
-		cmd:                q["command"],
-		stdin:              utils.AsBool(q.Get("stdin")),
-		stdout:             utils.AsBool(q.Get("stdout")),
-		stderr:             utils.AsBool(q.Get("stderr")),
-		tty:                utils.AsBool(q.Get("tty")),
-		httpRequest:        req,
-		httpResponseWriter: w,
-		context:            req.Context(),
-		pingPeriod:         f.cfg.ConnPingPeriod,
-	}
+	request := createRemoteCommandRequest(req, w, p, f.cfg.ConnPingPeriod)
 	eventPodMeta := request.eventPodMeta(request.context, sess.creds)
 
 	var recorder events.SessionRecorder
