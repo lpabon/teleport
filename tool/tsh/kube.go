@@ -19,6 +19,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,11 +66,26 @@ func newKubeCommand(app *kingpin.Application) kubeCommands {
 
 type kubeExecCommand struct {
 	*kingpin.CmdClause
+	target    string
+	command   string
 	container string
-	filename  string
 	quiet     bool
 	stdin     bool
 	tty       bool
+}
+
+func (c *kubeExecCommand) getCmd() []string {
+	var parts []string
+	parts = append(parts, c.target)
+	if len(c.container) > 0 {
+		parts = append(parts, "-c", c.container)
+	}
+	parts = append(parts, "--quiet="+strconv.FormatBool(c.quiet))
+	parts = append(parts, "--stdin="+strconv.FormatBool(c.stdin))
+	parts = append(parts, "--tty="+strconv.FormatBool(c.tty))
+	parts = append(parts, "--", c.command)
+
+	return parts
 }
 
 func newKubeExecCommand(parent *kingpin.CmdClause) *kubeExecCommand {
@@ -76,8 +93,9 @@ func newKubeExecCommand(parent *kingpin.CmdClause) *kubeExecCommand {
 		CmdClause: parent.Command("exec", "Run an executable or initiate an interactive session."),
 	}
 
+	c.Flag("target", "The execution target. This may be a pod or a deployment").StringVar(&c.target)
+	c.Flag("command", "The command to execute on the target").StringVar(&c.command)
 	c.Flag("container", "Container name. If omitted, use the kubectl.kubernetes.io/default-container annotation for selecting the container to be attached or the first container in the pod will be chosen.").StringVar(&c.container)
-	c.Flag("filename", "to use to exec into the resource").StringVar(&c.filename)
 	c.Flag("quiet", "Only print output from the remote session").BoolVar(&c.quiet)
 	c.Flag("stdin", "Pass stdin to the container").BoolVar(&c.stdin)
 	c.Flag("tty", "Stdin is a TTY").BoolVar(&c.tty)
@@ -85,7 +103,10 @@ func newKubeExecCommand(parent *kingpin.CmdClause) *kubeExecCommand {
 }
 
 func (c *kubeExecCommand) run(cf *CLIConf) error {
-	return nil
+	parts := c.getCmd()
+	cmd := exec.Command(parts[0], parts[1:]...)
+	err := cmd.Start()
+	return trace.Wrap(err)
 }
 
 type kubeJoinCommand struct {
@@ -103,7 +124,14 @@ func newKubeJoinCommand(parent *kingpin.CmdClause) *kubeJoinCommand {
 }
 
 func (c *kubeJoinCommand) run(cf *CLIConf) error {
-	return nil
+	ce := &kubeExecCommand{
+		target: "uuid" + c.sessionID,
+	}
+
+	parts := ce.getCmd()
+	cmd := exec.Command(parts[0], parts[1:]...)
+	err := cmd.Start()
+	return trace.Wrap(err)
 }
 
 type kubeCredentialsCommand struct {
