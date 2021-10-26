@@ -741,10 +741,37 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		f.mu.Unlock()
 		session.WaitOnStart(participant)
 
-		// TODO(joel): attach multiplexer here
+		q := req.URL.Query()
+		request := remoteCommandRequest{
+			podNamespace:       p.ByName("podNamespace"),
+			podName:            p.ByName("podName"),
+			containerName:      q.Get("container"),
+			cmd:                q["command"],
+			stdin:              utils.AsBool(q.Get("stdin")),
+			stdout:             utils.AsBool(q.Get("stdout")),
+			stderr:             utils.AsBool(q.Get("stderr")),
+			tty:                utils.AsBool(q.Get("tty")),
+			httpRequest:        req,
+			httpResponseWriter: w,
+			context:            req.Context(),
+			pingPeriod:         f.cfg.ConnPingPeriod,
+		}
+
+		proxy, err := createRemoteCommandProxy(request)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		defer proxy.Close()
+
+		clientOptions := proxy.options()
+		session.Multiplexer().AddClient(clientOptions.Stdin, clientOptions.Stdout, clientOptions.Stderr)
+		session.WaitUntilTerminated()
+		return nil, nil
 	}
 
 	session := NewSession(participant)
+	defer session.Terminate()
+
 	f.mu.Lock()
 	f.sessions[session.uuid] = session
 	f.mu.Unlock()

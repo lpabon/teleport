@@ -25,8 +25,9 @@ import (
 type SessionState int
 
 const (
-	SessionPending SessionState = 1
-	SessionRunning SessionState = 2
+	SessionPending    SessionState = 1
+	SessionRunning    SessionState = 2
+	SessionTerminated SessionState = 3
 )
 
 // Participant stores all state for a session participant required for networking and permission checking.
@@ -36,10 +37,11 @@ type Participant struct {
 
 // Session stores the state of an ongoing interactive session.
 type Session struct {
-	mu       sync.Mutex
-	uuid     uuid.UUID
-	owner    *Participant
-	notifier chan struct{}
+	mu         sync.Mutex
+	uuid       uuid.UUID
+	owner      *Participant
+	notifier   chan struct{}
+	terminated chan struct{}
 
 	// mutable, protected by lock
 	state SessionState
@@ -70,8 +72,12 @@ func NewSession(owner *Participant) *Session {
 // and waits for the session to transition to a running state.
 func (s *Session) WaitOnStart(participant *Participant) {
 	s.mu.Lock()
-	s.participants = append(s.participants, participant)
 
+	if s.state == SessionTerminated {
+		panic("yah no")
+	}
+
+	s.participants = append(s.participants, participant)
 	if s.state == SessionRunning {
 		return
 	}
@@ -88,6 +94,22 @@ func (s *Session) WaitOnStart(participant *Participant) {
 		if open {
 			panic("something is terribly wrong")
 		}
+	}
+}
+
+func (s *Session) Terminate() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.state = SessionTerminated
+	close(s.terminated)
+}
+
+func (s *Session) WaitUntilTerminated() {
+	_, open := <-s.terminated
+
+	if open {
+		panic("something is terribly wrong")
 	}
 }
 
