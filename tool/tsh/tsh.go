@@ -626,12 +626,12 @@ func Run(args []string, opts ...cliOption) error {
 		err = kube.ls.run(&cf)
 	case kube.login.FullCommand():
 		err = kube.login.run(&cf)
-
+	case kube.exec.FullCommand():
+		err = kube.exec.run(&cf)
 	case proxySSH.FullCommand():
 		err = onProxyCommandSSH(&cf)
 	case proxyDB.FullCommand():
 		err = onProxyCommandDB(&cf)
-
 	case dbList.FullCommand():
 		err = onListDatabases(&cf)
 	case dbLogin.FullCommand():

@@ -46,6 +46,7 @@ type kubeCommands struct {
 	credentials *kubeCredentialsCommand
 	ls          *kubeLSCommand
 	login       *kubeLoginCommand
+	exec        *kubeExecCommand
 }
 
 func newKubeCommand(app *kingpin.Application) kubeCommands {
@@ -54,8 +55,35 @@ func newKubeCommand(app *kingpin.Application) kubeCommands {
 		credentials: newKubeCredentialsCommand(kube),
 		ls:          newKubeLSCommand(kube),
 		login:       newKubeLoginCommand(kube),
+		exec:        newKubeExecCommand(kube),
 	}
 	return cmds
+}
+
+type kubeExecCommand struct {
+	*kingpin.CmdClause
+	container string
+	filename  string
+	quiet     bool
+	stdin     bool
+	tty       bool
+}
+
+func newKubeExecCommand(parent *kingpin.CmdClause) *kubeExecCommand {
+	c := &kubeExecCommand{
+		CmdClause: parent.Command("exec", "Run an executable or initiate an interactive session."),
+	}
+
+	c.Flag("container", "Container name. If omitted, use the kubectl.kubernetes.io/default-container annotation for selecting the container to be attached or the first container in the pod will be chosen.").StringVar(&c.container)
+	c.Flag("filename", "to use to exec into the resource").StringVar(&c.filename)
+	c.Flag("quiet", "Only print output from the remote session").BoolVar(&c.quiet)
+	c.Flag("stdin", "Pass stdin to the container").BoolVar(&c.stdin)
+	c.Flag("tty", "Stdin is a TTY").BoolVar(&c.tty)
+	return c
+}
+
+func (c *kubeExecCommand) run(cf *CLIConf) error {
+	return nil
 }
 
 type kubeCredentialsCommand struct {
