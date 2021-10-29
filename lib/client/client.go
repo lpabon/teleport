@@ -434,7 +434,13 @@ func (proxy *ProxyClient) IssueUserCertsWithMFA(ctx context.Context, params Reis
 		case proto.UserCertsRequest_Kubernetes:
 			key.KubeTLSCerts[initReq.KubernetesCluster] = crt.TLS
 		case proto.UserCertsRequest_Database:
-			key.DBTLSCerts[initReq.RouteToDatabase.ServiceName] = crt.TLS
+			switch params.RouteToDatabase.Protocol {
+			case defaults.ProtocolMongoDB:
+				// MongoDB expects certificate and key pair in the same pem file.
+				key.DBTLSCerts[params.RouteToDatabase.ServiceName] = append(crt.TLS, key.Priv...)
+			default:
+				key.DBTLSCerts[initReq.RouteToDatabase.ServiceName] = crt.TLS
+			}
 		default:
 			return nil, trace.BadParameter("server returned a TLS certificate but cert request usage was %s", initReq.Usage)
 		}
