@@ -16,7 +16,7 @@ Heavily regulated and security critical industries require that one or more obse
 are present in Kubernetes Access sessions and viewing it live in order to guarantee that
 operator does not perform any mistakes or acts of malice.
 
-Such observers need to have the power to end or lock a session immediately should anything go wrong.
+Such observers need to have the power to terminate a session immediately should anything go wrong.
 
 To suit everyone this will need a more detailed configuration model based on rules
 that can be used to define observers, their powers and when and in what capacity they are required.
@@ -41,8 +41,7 @@ but only streams back input from the initiator.
 #### Session observers
 
 A core feature we need to support is required observers. This will allow cluster administrators to configure
-policies that require certain Teleport users of a certain role to be actively monitoring the session. Each of these
-observers will also have the power to lock input/output for the session controller or instantly end it.
+policies that require certain Teleport users of a certain role to be actively monitoring the session.
 
 This feature is useful in security critical environments where multiple people need to witness every action
 in the event of severe error or malice and have the ability to halt any erroneous or malicious action.
