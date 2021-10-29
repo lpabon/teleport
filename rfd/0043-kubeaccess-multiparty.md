@@ -112,7 +112,7 @@ The initial implementation of multiparty sessions on Kubernetes access will only
 Terminating the `kubectl` process that started the session terminates the session. Terminating an observer `tsh` process
 disconnects the observer from the session and applies relevant state transitions if any.
 
-Terminating the session from a observer `tsh` instance can be done with the key combination ´CTRL-T`
+Terminating the session from a observer `tsh` instance can be done with the key combination `CTRL-T`
 
 ##### Session creation
 
