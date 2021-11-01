@@ -73,7 +73,7 @@ func NodeIDFromIID(iid *imds.InstanceIdentityDocument) string {
 func checkEC2AllowRules(ctx context.Context, iid *imds.InstanceIdentityDocument, provisionToken types.ProvisionToken) error {
 	allowRules := provisionToken.GetAllowRules()
 	for _, rule := range allowRules {
-		// If this rule specifies and AWS account, the IID must match
+		// If this rule specifies an AWS account, the IID must match
 		if len(rule.AWSAccount) > 0 {
 			if rule.AWSAccount != iid.AccountID {
 				continue

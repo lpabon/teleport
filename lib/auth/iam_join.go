@@ -20,24 +20,34 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 
+	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/types"
+	"github.com/gravitational/teleport/api/utils"
+
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/gravitational/trace"
+	"google.golang.org/grpc/peer"
 )
 
 const (
 	expectedSTSIdentityRequestBody = "Action=GetCallerIdentity&Version=2011-06-15"
 	stsHost                        = "sts.amazonaws.com"
 	challengeHeaderKey             = "X-Teleport-Challenge"
+	normalizedChallengeHeaderKey   = "x-teleport-challenge"
 	authHeaderKey                  = "Authorization"
 )
 
-var validAuthHeader = regexp.MustCompile(`^\S+ Credential=\S+ SignedHeaders=\S*x-teleport-challenge`)
+var signedHeadersRe = regexp.MustCompile(`^AWS4-HMAC-SHA256 Credential=\S+, SignedHeaders=(\S+), Signature=\S+$`)
 
 func validateSTSIdentityRequest(req *http.Request, challenge string) error {
 	if req.Host != stsHost {
@@ -53,20 +63,28 @@ func validateSTSIdentityRequest(req *http.Request, challenge string) error {
 	}
 
 	authHeader := req.Header.Get(authHeaderKey)
-	if !validAuthHeader.MatchString(authHeader) {
+	matches := signedHeadersRe.FindStringSubmatch(authHeader)
+	// first match should be the full header, second is the SignedHeaders
+	if len(matches) < 2 {
 		return trace.AccessDenied("sts identity request Authorization header is invalid")
 	}
+	signedHeadersString := string(matches[1])
+	signedHeaders := strings.Split(signedHeadersString, ";")
+	if !utils.SliceContainsStr(signedHeaders, normalizedChallengeHeaderKey) {
+		return trace.AccessDenied("sts identity request auth header %q does not include "+
+			normalizedChallengeHeaderKey+" as a signed header", authHeader)
+	}
 
+	// read and replace request body
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return trace.Wrap(err)
 	}
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	if !bytes.Equal([]byte(expectedSTSIdentityRequestBody), body) {
 		return trace.BadParameter("sts request body %q does not equal expected %q", string(body), expectedSTSIdentityRequestBody)
 	}
-
-	req.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	return nil
 }
@@ -77,7 +95,8 @@ func parseSTSRequest(req []byte) (*http.Request, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	// unset RequestURI and set req.URL instead (quirk of using http.ReadRequest)
+	// Unset RequestURI and set req.URL instead (necessary quirk of sending a
+	// request parsed by http.ReadRequest). Also, force https here.
 	httpReq.RequestURI = ""
 	httpReq.URL = &url.URL{
 		Scheme: "https",
@@ -88,45 +107,90 @@ func parseSTSRequest(req []byte) (*http.Request, error) {
 
 type stsIdentityResponse struct {
 	GetCallerIdentityResponse struct {
-		GetCallerIdentityResult struct {
-			Account string
-			Arn     string
-		}
+		GetCallerIdentityResult awsIdentity
 	}
 }
 
-func executeSTSIdentityRequest(req *http.Request) (*stsIdentityResponse, error) {
-	resp, err := http.DefaultClient.Do(req)
+type awsIdentity struct {
+	Account string
+	Arn     string
+}
+
+type httpClient interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+func executeSTSIdentityRequest(ctx context.Context, client httpClient, req *http.Request) (identity awsIdentity, err error) {
+	req = req.WithContext(ctx)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, trace.Wrap(err)
+		return identity, trace.Wrap(err)
 	}
-	defer func() {
-		// always read the body to EOF and close
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-	}()
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return identity, trace.Wrap(err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, trace.AccessDenied("aws sts api returned status: %q", resp.Status)
+		return identity, trace.AccessDenied("aws sts api returned status: %q body: %q",
+			resp.Status, body)
 	}
 
 	var identityResponse stsIdentityResponse
-	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(&identityResponse); err != nil {
-		return nil, trace.Wrap(err)
+	if err := json.Unmarshal(body, &identityResponse); err != nil {
+		return identity, trace.Wrap(err)
 	}
-	return &identityResponse, nil
+	return identityResponse.GetCallerIdentityResponse.GetCallerIdentityResult, nil
 }
 
-func checkIAMAllowRules(identityResponse *stsIdentityResponse, provisionToken types.ProvisionToken) error {
-	return trace.NotImplemented("checkIAMAllowRules")
+// arnMatches returns true if arn matches the pattern. pattern should be an AWS
+// ARN which may include "*" to match any combination of zero or more characters
+// and "?" to match any single character, see https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_resource.html
+func arnMatches(pattern, arn string) (bool, error) {
+	// asterisk should match zero or
+	pattern = strings.ReplaceAll(pattern, "*", ".*")
+	pattern = strings.ReplaceAll(pattern, "?", ".")
+	pattern = "^" + pattern + "$"
+	matched, err := regexp.MatchString(pattern, arn)
+	return matched, trace.Wrap(err)
 }
 
-func (a *Server) CheckIAMRequest(ctx context.Context, challenge string, req types.RegisterUsingTokenRequest) error {
+func checkIAMAllowRules(identity awsIdentity, provisionToken types.ProvisionToken) error {
+	allowRules := provisionToken.GetAllowRules()
+	for _, rule := range allowRules {
+		// If this rule specifies an AWS account, the identity must match
+		if len(rule.AWSAccount) > 0 {
+			if rule.AWSAccount != identity.Account {
+				// account doesn't match, continue to check the next rule
+				continue
+			}
+		}
+		if len(rule.AWSARN) > 0 {
+			matches, err := arnMatches(rule.AWSARN, identity.Arn)
+			if err != nil {
+				return trace.Wrap(err)
+			}
+			if !matches {
+				// arn doesn't match, continue to check the next rule
+				continue
+			}
+		}
+		// identity matches this allow rule
+		return nil
+	}
+	return trace.AccessDenied("instance did not match any allow rules")
+}
+
+func (a *Server) checkIAMRequest(ctx context.Context, client httpClient, challenge string, req *types.RegisterUsingTokenRequest) error {
 	tokenName := req.Token
 	provisionToken, err := a.GetCache().GetToken(ctx, tokenName)
 	if err != nil {
 		return trace.Wrap(err)
+	}
+	if provisionToken.GetJoinMethod() != types.JoinMethodIAM {
+		return trace.AccessDenied("this token does not support the IAM join method")
 	}
 
 	identityRequest, err := parseSTSRequest(req.STSIdentityRequest)
@@ -138,14 +202,92 @@ func (a *Server) CheckIAMRequest(ctx context.Context, challenge string, req type
 		return trace.Wrap(err)
 	}
 
-	identityResponse, err := executeSTSIdentityRequest(identityRequest)
+	identity, err := executeSTSIdentityRequest(ctx, client, identityRequest)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	if err := checkIAMAllowRules(identityResponse, provisionToken); err != nil {
+	if err := checkIAMAllowRules(identity, provisionToken); err != nil {
 		return trace.Wrap(err)
 	}
 
 	return nil
+}
+
+type registerUsingIAMMethodServer interface {
+	Send(*proto.RegisterUsingIAMMethodResponse) error
+	Recv() (*types.RegisterUsingTokenRequest, error)
+	Context() context.Context
+}
+
+func (a *Server) registerUsingIAMMethod(srv registerUsingIAMMethodServer) error {
+	ctx := srv.Context()
+
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return trace.AccessDenied("failed to read peer information from gRPC context")
+	}
+	nodeAddress := p.Addr.String()
+
+	// read 32 crypto-random bytes to generate the challenge
+	challengeRawBytes := make([]byte, 32)
+	if _, err := rand.Read(challengeRawBytes); err != nil {
+		return trace.Wrap(err)
+	}
+
+	// encode the challenge to base64 so it can be sent in an HTTP header
+	encoding := base64.RawStdEncoding
+	challengeBase64 := make([]byte, encoding.EncodedLen(len(challengeRawBytes)))
+	encoding.Encode(challengeBase64, challengeRawBytes)
+	challengeString := string(challengeBase64)
+
+	// send the challenge to the node
+	if err := srv.Send(&proto.RegisterUsingIAMMethodResponse{
+		Challenge: challengeString,
+	}); err != nil {
+		return trace.Wrap(err)
+	}
+
+	req, err := srv.Recv()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	req.RemoteAddr = nodeAddress
+
+	if err := a.checkIAMRequest(ctx, http.DefaultClient, challengeString, req); err != nil {
+		return trace.Wrap(err)
+	}
+
+	certs, err := a.RegisterUsingToken(*req)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	return trace.Wrap(srv.Send(&proto.RegisterUsingIAMMethodResponse{
+		Certs: certs,
+	}))
+}
+
+// createSignedSTSIdentityRequest is called by the client and returns an
+// sts:GetCallerIdentity request signed with the local AWS credentials
+func createSignedSTSIdentityRequest(challenge string) ([]byte, error) {
+	// use the aws sdk to generate the request
+	sess := session.New()
+	stsService := sts.New(sess)
+	req, _ := stsService.GetCallerIdentityRequest(&sts.GetCallerIdentityInput{})
+	// set challenge header
+	req.HTTPRequest.Header.Set("X-Teleport-Challenge", challenge)
+	// request json for simpler parsing
+	req.HTTPRequest.Header.Set("accept", "application/json")
+	// sign the request, including headers
+	if err := req.Sign(); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	// write the signed HTTP request to a buffer
+	var signedRequest bytes.Buffer
+	if err := req.HTTPRequest.Write(&signedRequest); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return signedRequest.Bytes(), nil
 }

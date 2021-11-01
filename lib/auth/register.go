@@ -17,12 +17,10 @@ limitations under the License.
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"fmt"
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/client"
@@ -34,8 +32,6 @@ import (
 	"github.com/gravitational/teleport/lib/tlsca"
 	"github.com/gravitational/teleport/lib/utils"
 
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/gravitational/trace"
 	"github.com/jonboulle/clockwork"
 )
@@ -262,7 +258,7 @@ func newUnauthenticatedClient(ctx context.Context, cfg *unauthenticatedClientCon
 				rawClusterCAs = clusterCAResponse.ClusterCAs
 				break
 			}
-			log.WithError(err).Debug("Failed to retrieve cluster CA certs from proxy "+
+			log.WithError(err).Debugf("Failed to retrieve cluster CA certs from proxy "+
 				"endpoint, %q is probably not a proxy", proxyAddr)
 		}
 	}
@@ -353,9 +349,11 @@ func newUnauthenticatedClient(ctx context.Context, cfg *unauthenticatedClientCon
 	return unauthenticatedClient, trace.Wrap(err)
 }
 
+// registerUsingIAMMethod
 func registerUsingIAMMethod(token string, params RegisterParams) (*Identity, error) {
-	ctx := context.TODO()
+	ctx := context.Background()
 
+	// create a client to the auth server
 	authClient, err := newUnauthenticatedClient(ctx, &unauthenticatedClientConfig{
 		Addrs:    utils.NetAddrsToStrings(params.Servers),
 		CAPins:   params.CAPins,
@@ -367,33 +365,26 @@ func registerUsingIAMMethod(token string, params RegisterParams) (*Identity, err
 		return nil, trace.Wrap(err)
 	}
 
+	// initiate the gRPC stream
 	stream, err := authClient.RegisterUsingIAMMethod(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	challengeResponse, err := stream.Recv()
+	// the first value received from the stream will be a challenge string which
+	// must be included in the signed sts:GetCallerIdentity request
+	challenge, err := stream.Recv()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	fmt.Println("NIC challenge:", challengeResponse.Challenge)
-
-	sess := session.New()
-	stsService := sts.New(sess)
-	req, _ := stsService.GetCallerIdentityRequest(&sts.GetCallerIdentityInput{})
-	req.HTTPRequest.Header.Set("X-Teleport-Challenge", challengeResponse.Challenge)
-	req.HTTPRequest.Header.Set("accept", "application/json")
-	if err := req.Sign(); err != nil {
-		return nil, trace.Wrap(err)
-	}
-	var signedRequest bytes.Buffer
-	if err := req.HTTPRequest.Write(&signedRequest); err != nil {
+	signedRequest, err := createSignedSTSIdentityRequest(challenge.Challenge)
+	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	fmt.Println("NIC signedRequest:", string(signedRequest.Bytes()))
-
+	// send the RegisterUsingTokenRequest including the challenge on the gRPC
+	// stream
 	if err := stream.Send(&types.RegisterUsingTokenRequest{
 		Token:                token,
 		HostID:               params.ID.HostUUID,
@@ -403,11 +394,13 @@ func registerUsingIAMMethod(token string, params RegisterParams) (*Identity, err
 		DNSNames:             params.DNSNames,
 		PublicTLSKey:         params.PublicTLSKey,
 		PublicSSHKey:         params.PublicSSHKey,
-		STSIdentityRequest:   signedRequest.Bytes(),
+		STSIdentityRequest:   signedRequest,
 	}); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
+	// the second value received from the gRPC stream contains the new signed
+	// host certs
 	certs, err := stream.Recv()
 	if err != nil {
 		return nil, trace.Wrap(err)
