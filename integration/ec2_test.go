@@ -187,14 +187,13 @@ func TestIAMNodeJoin(t *testing.T) {
 	require.NoError(t, err)
 
 	// create and start the auth server
-	authConfig := newAuthConfig(t, clock)
+	authConfig := newAuthConfig(t, nil)
 	authSvc, err := service.NewTeleport(authConfig)
 	require.NoError(t, err)
 	require.NoError(t, authSvc.Start())
 	t.Cleanup(func() { require.NoError(t, authSvc.Close()) })
 
 	authServer := authSvc.GetAuthServer()
-	authServer.SetClock(clock)
 
 	err = authServer.UpsertToken(context.Background(), token)
 	require.NoError(t, err)
@@ -205,7 +204,7 @@ func TestIAMNodeJoin(t *testing.T) {
 	require.Empty(t, nodes)
 
 	// create and start the node
-	nodeConfig := newNodeConfig(t, authConfig.Auth.SSHAddr, tokenName, types.JoinMethodEC2)
+	nodeConfig := newNodeConfig(t, authConfig.Auth.SSHAddr, tokenName, types.JoinMethodIAM)
 	nodeSvc, err := service.NewTeleport(nodeConfig)
 	require.NoError(t, err)
 	require.NoError(t, nodeSvc.Start())
