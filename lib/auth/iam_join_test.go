@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/gravitational/teleport/api/types"
+	"github.com/gravitational/trace"
 	"github.com/stretchr/testify/require"
 )
 
-type mockHTTPClient struct {
+type mockSTSClient struct {
 	nodeIdentity awsIdentity
 }
 
-func (m mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
+func (m mockSTSClient) Do(req *http.Request) (*http.Response, error) {
 	responseBody := fmt.Sprintf(`{
 		"GetCallerIdentityResponse": {
 			"GetCallerIdentityResult": {
@@ -27,6 +28,16 @@ func (m mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 
 	return &http.Response{
 		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(responseBody)),
+	}, nil
+}
+
+type errorSTSClient struct{}
+
+func (_ errorSTSClient) Do(req *http.Request) (*http.Response, error) {
+	responseBody := "Access Denied"
+	return &http.Response{
+		StatusCode: http.StatusForbidden,
 		Body:       io.NopCloser(strings.NewReader(responseBody)),
 	}, nil
 }
@@ -42,10 +53,12 @@ func TestIAMJoin(t *testing.T) {
 	}
 
 	testCases := []struct {
-		desc         string
-		tokenSpec    types.ProvisionTokenSpecV2
-		expectError  func(error) bool
-		nodeIdentity awsIdentity
+		desc              string
+		tokenSpec         types.ProvisionTokenSpecV2
+		givenChallenge    string
+		responseChallenge string
+		stsClient         stsClient
+		expectError       func(error) bool
 	}{
 		{
 			desc: "basic passing case",
@@ -53,16 +66,148 @@ func TestIAMJoin(t *testing.T) {
 				Roles: []types.SystemRole{types.RoleNode},
 				Allow: []*types.TokenRule{
 					&types.TokenRule{
-						AWSAccount: "",
+						AWSAccount: "1234",
+						AWSARN:     "arn:aws::1111",
 					},
 				},
 				JoinMethod: types.JoinMethodIAM,
 			},
-			nodeIdentity: awsIdentity{
-				Account: "1234",
-				Arn:     "arn:aws::1111",
+			stsClient: mockSTSClient{
+				nodeIdentity: awsIdentity{
+					Account: "1234",
+					Arn:     "arn:aws::1111",
+				},
 			},
-			expectError: isNil,
+			givenChallenge:    "test-challenge",
+			responseChallenge: "test-challenge",
+			expectError:       isNil,
+		},
+		{
+			desc: "wildcard arn 1",
+			tokenSpec: types.ProvisionTokenSpecV2{
+				Roles: []types.SystemRole{types.RoleNode},
+				Allow: []*types.TokenRule{
+					&types.TokenRule{
+						AWSAccount: "1234",
+						AWSARN:     "arn:aws::role/admins-*",
+					},
+				},
+				JoinMethod: types.JoinMethodIAM,
+			},
+			stsClient: mockSTSClient{
+				nodeIdentity: awsIdentity{
+					Account: "1234",
+					Arn:     "arn:aws::role/admins-test",
+				},
+			},
+			givenChallenge:    "test-challenge",
+			responseChallenge: "test-challenge",
+			expectError:       isNil,
+		},
+		{
+			desc: "wildcard arn 2",
+			tokenSpec: types.ProvisionTokenSpecV2{
+				Roles: []types.SystemRole{types.RoleNode},
+				Allow: []*types.TokenRule{
+					&types.TokenRule{
+						AWSAccount: "1234",
+						AWSARN:     "arn:aws::role/admins-???",
+					},
+				},
+				JoinMethod: types.JoinMethodIAM,
+			},
+			stsClient: mockSTSClient{
+				nodeIdentity: awsIdentity{
+					Account: "1234",
+					Arn:     "arn:aws::role/admins-123",
+				},
+			},
+			givenChallenge:    "test-challenge",
+			responseChallenge: "test-challenge",
+			expectError:       isNil,
+		},
+		{
+			desc: "wrong arn 1",
+			tokenSpec: types.ProvisionTokenSpecV2{
+				Roles: []types.SystemRole{types.RoleNode},
+				Allow: []*types.TokenRule{
+					&types.TokenRule{
+						AWSAccount: "1234",
+						AWSARN:     "arn:aws::role/admins-???",
+					},
+				},
+				JoinMethod: types.JoinMethodIAM,
+			},
+			stsClient: mockSTSClient{
+				nodeIdentity: awsIdentity{
+					Account: "1234",
+					Arn:     "arn:aws::role/admins-1234",
+				},
+			},
+			givenChallenge:    "test-challenge",
+			responseChallenge: "test-challenge",
+			expectError:       trace.IsAccessDenied,
+		},
+		{
+			desc: "wrong challenge",
+			tokenSpec: types.ProvisionTokenSpecV2{
+				Roles: []types.SystemRole{types.RoleNode},
+				Allow: []*types.TokenRule{
+					&types.TokenRule{
+						AWSAccount: "1234",
+						AWSARN:     "arn:aws::1111",
+					},
+				},
+				JoinMethod: types.JoinMethodIAM,
+			},
+			stsClient: mockSTSClient{
+				nodeIdentity: awsIdentity{
+					Account: "1234",
+					Arn:     "arn:aws::1111",
+				},
+			},
+			givenChallenge:    "test-challenge",
+			responseChallenge: "wrong-challenge",
+			expectError:       trace.IsAccessDenied,
+		},
+		{
+			desc: "wrong account",
+			tokenSpec: types.ProvisionTokenSpecV2{
+				Roles: []types.SystemRole{types.RoleNode},
+				Allow: []*types.TokenRule{
+					&types.TokenRule{
+						AWSAccount: "1234",
+						AWSARN:     "arn:aws::1111",
+					},
+				},
+				JoinMethod: types.JoinMethodIAM,
+			},
+			stsClient: mockSTSClient{
+				nodeIdentity: awsIdentity{
+					Account: "5678",
+					Arn:     "arn:aws::1111",
+				},
+			},
+			givenChallenge:    "test-challenge",
+			responseChallenge: "test-challenge",
+			expectError:       trace.IsAccessDenied,
+		},
+		{
+			desc: "sts api error",
+			tokenSpec: types.ProvisionTokenSpecV2{
+				Roles: []types.SystemRole{types.RoleNode},
+				Allow: []*types.TokenRule{
+					&types.TokenRule{
+						AWSAccount: "1234",
+						AWSARN:     "arn:aws::1111",
+					},
+				},
+				JoinMethod: types.JoinMethodIAM,
+			},
+			stsClient:         errorSTSClient{},
+			givenChallenge:    "test-challenge",
+			responseChallenge: "test-challenge",
+			expectError:       trace.IsAccessDenied,
 		},
 	}
 
@@ -78,8 +223,7 @@ func TestIAMJoin(t *testing.T) {
 			require.NoError(t, a.UpsertToken(ctx, token))
 			t.Cleanup(func() { require.NoError(t, a.DeleteToken(ctx, token.GetName())) })
 
-			challenge := "dummy-challenge"
-			signedRequest, err := createSignedSTSIdentityRequest(challenge)
+			signedRequest, err := createSignedSTSIdentityRequest(tc.responseChallenge)
 			require.NoError(t, err)
 			req := &types.RegisterUsingTokenRequest{
 				Token:              "test-token",
@@ -88,11 +232,7 @@ func TestIAMJoin(t *testing.T) {
 				STSIdentityRequest: signedRequest,
 			}
 
-			httpClient := mockHTTPClient{
-				nodeIdentity: tc.nodeIdentity,
-			}
-
-			err = a.checkIAMRequest(ctx, httpClient, challenge, req)
+			err = a.checkIAMRequest(ctx, tc.stsClient, tc.givenChallenge, req)
 			require.True(t, tc.expectError(err))
 		})
 	}

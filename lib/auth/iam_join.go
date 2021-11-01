@@ -116,11 +116,11 @@ type awsIdentity struct {
 	Arn     string
 }
 
-type httpClient interface {
+type stsClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-func executeSTSIdentityRequest(ctx context.Context, client httpClient, req *http.Request) (identity awsIdentity, err error) {
+func executeSTSIdentityRequest(ctx context.Context, client stsClient, req *http.Request) (identity awsIdentity, err error) {
 	req = req.WithContext(ctx)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -183,7 +183,7 @@ func checkIAMAllowRules(identity awsIdentity, provisionToken types.ProvisionToke
 	return trace.AccessDenied("instance did not match any allow rules")
 }
 
-func (a *Server) checkIAMRequest(ctx context.Context, client httpClient, challenge string, req *types.RegisterUsingTokenRequest) error {
+func (a *Server) checkIAMRequest(ctx context.Context, client stsClient, challenge string, req *types.RegisterUsingTokenRequest) error {
 	tokenName := req.Token
 	provisionToken, err := a.GetCache().GetToken(ctx, tokenName)
 	if err != nil {
