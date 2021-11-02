@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	//"encoding/json"
 	"flag"
 	"time"
 
@@ -35,12 +34,12 @@ var (
 )
 
 func init() {
-	flag.StringVar(&opts.Kubeconfig, "kubeconfig", "kubeconfig", "Output kubeconfig")
-	flag.StringVar(&opts.Cluster, "cluster", "", "K8S Cluster name")
-	flag.StringVar(&opts.TeleportProxyPort, "proxy-port", "3080", "Teleport proxy port")
-	flag.StringVar(&opts.TeleportServer, "server", "ip-70-0-0-129.brbnca.spcsdns.net", "Teleport server")
-	flag.StringVar(&opts.TeleportKubeProxyPort, "kube-proxy-port", "3026", "Teleport proxy server")
-	flag.StringVar(&opts.TeleportIdentityFile, "identity", "", "Teleport identity file")
+	flag.StringVar(&opts.Kubeconfig, "pxt.kubeconfig", "kubeconfig", "Output kubeconfig")
+	flag.StringVar(&opts.Cluster, "pxt.cluster", "", "K8S Cluster name")
+	flag.StringVar(&opts.TeleportProxyPort, "pxt.proxy-port", "3080", "Teleport proxy port")
+	flag.StringVar(&opts.TeleportServer, "pxt.server", "ip-70-0-0-129.brbnca.spcsdns.net", "Teleport server")
+	flag.StringVar(&opts.TeleportKubeProxyPort, "pxt.kube-proxy-port", "3026", "Teleport proxy server")
+	flag.StringVar(&opts.TeleportIdentityFile, "pxt.identity", "", "Teleport identity file")
 }
 
 func main() {
@@ -97,12 +96,16 @@ func main() {
 			if opts.Cluster == "" {
 				// for the demo, just pick one
 				kubeCluster = cluster.Name
-				logrus.Infof("Using kube cluster %s", cluster.Name)
+				logrus.Infof("Using kube cluster %s but you can supply your own on the arguments", cluster.Name)
 				break
 			} else if cluster.Name == opts.Cluster {
 				kubeCluster = cluster.Name
 				break
 			}
+		}
+
+		if kubeCluster != "" {
+			break
 		}
 	}
 	if kubeCluster == "" {
@@ -128,15 +131,26 @@ func main() {
 		logrus.Fatalf("failed to get identity keys: %v", err)
 	}
 
+	// Get the user
+	username, err := ikey.CertUsername()
+	if err != nil {
+		logrus.Errorf("failed to get user name from identity: %v", err)
+	}
+	logrus.Infof("Cert user is %s", username)
+
+	// Setup the Teleport cluster name
 	if key.ClusterName == "" {
 		key.ClusterName = opts.TeleportServer
 	}
 
+	// Ask Teleport server for new certs
 	certs, err := clt.GenerateUserCerts(ctx, proto.UserCertsRequest{
-		PublicKey:         key.Pub,
-		Username:          "api-user",
-		Expires:           time.Now().UTC().Add(time.Hour),
-		RouteToCluster:    key.ClusterName,
+		PublicKey:      key.Pub,
+		Username:       username,
+		Expires:        time.Now().UTC().Add(time.Hour),
+		RouteToCluster: key.ClusterName,
+
+		// For this k8s cluster
 		KubernetesCluster: kubeCluster,
 	})
 	if err != nil {
@@ -146,6 +160,7 @@ func main() {
 	key.TLSCert = certs.TLS
 	key.TrustedCA = ikey.TrustedCA
 
+	// Write kubeconfig
 	filesWritten, err := identityfile.Write(identityfile.WriteConfig{
 		OutputPath:           opts.Kubeconfig,
 		Key:                  key,
