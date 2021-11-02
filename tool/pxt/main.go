@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/gravitational/teleport/api/client"
+	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/sirupsen/logrus"
 
 	teleport "github.com/gravitational/teleport/api/client"
@@ -91,16 +92,41 @@ func main() {
 			//kubeCluster = cluster.Name
 		}
 	}
+	// ----------------------------------
+	// Test new key model
+	// ----------------------------------
+	key, err := tc.NewKey()
+	if err != nil {
+		logrus.Fatalf("failed to generate keys: %v", err)
+	}
 
 	// ----------------------------------
 	// Get a kubernetes cluster kubeconfig
 	// ----------------------------------
 
 	// Generate a new key pair
-	key, err := tc.KeyFromIdentityFile(opts.TeleportIdentityFile)
+	ikey, err := tc.KeyFromIdentityFile(opts.TeleportIdentityFile)
+	if err != nil {
+		logrus.Fatalf("failed to get identity keys: %v", err)
+	}
+
 	if key.ClusterName == "" {
 		key.ClusterName = opts.TeleportServer
 	}
+
+	certs, err := clt.GenerateUserCerts(ctx, proto.UserCertsRequest{
+		PublicKey:         key.Pub,
+		Username:          "api-user",
+		Expires:           time.Now().UTC().Add(time.Hour),
+		RouteToCluster:    key.ClusterName,
+		KubernetesCluster: "t1",
+	})
+	if err != nil {
+		logrus.Fatalf("failed to generate keys: %v", err)
+	}
+	key.Cert = certs.SSH
+	key.TLSCert = certs.TLS
+	key.TrustedCA = ikey.TrustedCA
 
 	filesWritten, err := identityfile.Write(identityfile.WriteConfig{
 		OutputPath:           "kubeconfig",
