@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
+
 	//"encoding/json"
 	"flag"
 	"time"
@@ -19,6 +22,7 @@ import (
 )
 
 type Opts struct {
+	Kubeconfig            string
 	Cluster               string
 	TeleportProxyPort     string
 	TeleportServer        string
@@ -31,6 +35,7 @@ var (
 )
 
 func init() {
+	flag.StringVar(&opts.Kubeconfig, "kubeconfig", "kubeconfig", "Output kubeconfig")
 	flag.StringVar(&opts.Cluster, "cluster", "", "K8S Cluster name")
 	flag.StringVar(&opts.TeleportProxyPort, "proxy-port", "3080", "Teleport proxy port")
 	flag.StringVar(&opts.TeleportServer, "server", "ip-70-0-0-129.brbnca.spcsdns.net", "Teleport server")
@@ -82,16 +87,29 @@ func main() {
 	}
 
 	// Choose a cluster
-	//kubeCluster := opts.
+	kubeCluster := ""
 	for _, service := range services {
 		clusters := service.GetKubernetesClusters()
 
 		// Show available k8s clusters
 		for _, cluster := range clusters {
 			logrus.Infof("Available kube cluster: %s", cluster.Name)
-			//kubeCluster = cluster.Name
+			if opts.Cluster == "" {
+				// for the demo, just pick one
+				kubeCluster = cluster.Name
+				logrus.Infof("Using kube cluster %s", cluster.Name)
+				break
+			} else if cluster.Name == opts.Cluster {
+				kubeCluster = cluster.Name
+				break
+			}
 		}
 	}
+	if kubeCluster == "" {
+		fmt.Printf("Kubernetes cluster %s not found\n", opts.Cluster)
+		os.Exit(1)
+	}
+
 	// ----------------------------------
 	// Test new key model
 	// ----------------------------------
@@ -119,7 +137,7 @@ func main() {
 		Username:          "api-user",
 		Expires:           time.Now().UTC().Add(time.Hour),
 		RouteToCluster:    key.ClusterName,
-		KubernetesCluster: "t1",
+		KubernetesCluster: kubeCluster,
 	})
 	if err != nil {
 		logrus.Fatalf("failed to generate keys: %v", err)
@@ -129,7 +147,7 @@ func main() {
 	key.TrustedCA = ikey.TrustedCA
 
 	filesWritten, err := identityfile.Write(identityfile.WriteConfig{
-		OutputPath:           "kubeconfig",
+		OutputPath:           opts.Kubeconfig,
 		Key:                  key,
 		Format:               identityfile.FormatKubernetes,
 		KubeProxyAddr:        "https://" + opts.TeleportServer + ":" + opts.TeleportKubeProxyPort,
