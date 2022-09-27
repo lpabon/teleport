@@ -950,9 +950,9 @@ func fetchKubeClusters(ctx context.Context, tc *client.TeleportClient) (teleport
 
 		resp, err := ac.GeneratePortworxToken(ctx, &proto.GeneratePortworxTokenRequest{})
 		if err != nil {
-			fmt.Printf("GP: error %v", err)
+			fmt.Printf("GP: error %v\n", err)
 		} else {
-			fmt.Printf("GP: TOKEN: %s", resp.GetToken())
+			fmt.Printf("GP: TOKEN: %s\n", resp.GetToken())
 		}
 
 		cn, err := ac.GetClusterName()
