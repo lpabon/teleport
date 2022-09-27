@@ -3897,6 +3897,17 @@ func (a *ServerWithRoles) GenerateSnowflakeJWT(ctx context.Context, req *proto.S
 	return a.authServer.GenerateSnowflakeJWT(ctx, req)
 }
 
+// GeneratePortworxToken
+func (a *ServerWithRoles) GeneratePortworxToken(
+	ctx context.Context,
+	req *proto.GeneratePortworxTokenRequest,
+) (*proto.GeneratePortworxTokenResponse, error) {
+	return a.authServer.GeneratePortworxToken(
+		ctx,
+		a.context.Identity.GetIdentity(),
+		req)
+}
+
 // canImpersonateBuiltinRole checks if the current user can impersonate the
 // provided system role.
 func (a *ServerWithRoles) canImpersonateBuiltinRole(role types.SystemRole) error {

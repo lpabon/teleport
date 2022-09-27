@@ -110,6 +110,15 @@ type SignParams struct {
 
 	// URI is the URI of the recipient application.
 	URI string
+
+	// Groups
+	Groups []string
+
+	// Email
+	Email string
+
+	// Subject
+	Subject string
 }
 
 // Check verifies all the values are valid.
@@ -177,6 +186,27 @@ func (k *Key) Sign(p SignParams) (string, error) {
 		},
 		Username: p.Username,
 		Roles:    p.Roles,
+	}
+
+	return k.sign(claims)
+}
+
+func (k *Key) SignPortworx(p SignParams) (string, error) {
+
+	// Sign the claims and create a JWT token.
+	claims := Claims{
+		Claims: jwt.Claims{
+			Subject:   k.config.ClusterName + "/" + p.Username,
+			Issuer:    k.config.ClusterName,
+			Audience:  jwt.Audience{p.URI},
+			NotBefore: jwt.NewNumericDate(k.config.Clock.Now().Add(-10 * time.Second)),
+			IssuedAt:  jwt.NewNumericDate(k.config.Clock.Now()),
+			Expiry:    jwt.NewNumericDate(p.Expires),
+		},
+		Name:   p.Username,
+		Roles:  p.Roles,
+		Groups: p.Groups,
+		Email:  p.Email,
 	}
 
 	return k.sign(claims)
@@ -320,10 +350,17 @@ type Claims struct {
 	jwt.Claims
 
 	// Username returns the Teleport identity of the user.
-	Username string `json:"username"`
+	Username string `json:"username,omitempty"`
 
 	// Roles returns the list of roles assigned to the user within Teleport.
-	Roles []string `json:"roles"`
+	Roles []string `json:"roles,omitempty"`
+
+	// Groups
+	Groups []string `json:"groups,omitempty"`
+
+	Email string `json:"email,omitempty"`
+
+	Name string `json:"name,omitempty"`
 }
 
 // GenerateKeyPair generates and return a PEM encoded private and public

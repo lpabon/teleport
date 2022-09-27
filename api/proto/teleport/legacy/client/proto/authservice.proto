@@ -683,6 +683,14 @@ message GenerateAppTokenResponse {
   string Token = 1 [(gogoproto.jsontag) = "token"];
 }
 
+// GeneratePortworxTokenRequest is empty
+message GeneratePortworxTokenRequest {}
+
+// GeneratePortworxTokenResponse contains the Portworx signed token
+message GeneratePortworxTokenResponse {
+  string Token = 1 [(gogoproto.jsontag) = "token"];
+}
+
 // GetAppSessionRequest are the parameters used to request an application web session.
 message GetAppSessionRequest {
   // SessionID is the ID of the session being requested.
@@ -2198,6 +2206,9 @@ service AuthService {
 
   // GenerateAppToken will generate a JWT token for application access.
   rpc GenerateAppToken(GenerateAppTokenRequest) returns (GenerateAppTokenResponse);
+
+  // Gets a Portworx token for the appropriate Teleport user
+  rpc GeneratePortworxToken(GeneratePortworxTokenRequest) returns (GeneratePortworxTokenResponse);
 
   // GetAppSession gets an application web session.
   rpc GetAppSession(GetAppSessionRequest) returns (GetAppSessionResponse);

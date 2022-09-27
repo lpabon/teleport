@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gravitational/teleport"
+	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/auth/native"
 	"github.com/gravitational/teleport/lib/jwt"
@@ -184,6 +185,51 @@ func waitForWebSession(ctx context.Context, sessionID, user string, evenSubKind 
 		}
 	}
 	return trace.Wrap(err)
+}
+
+func (s *Server) GeneratePortworxToken(
+	ctx context.Context,
+	identity tlsca.Identity,
+	req *proto.GeneratePortworxTokenRequest,
+) (*proto.GeneratePortworxTokenResponse, error) {
+
+	// Get the clusters CA.
+	clusterName, err := s.GetDomainName()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	ca, err := s.GetCertAuthority(ctx, types.CertAuthID{
+		Type:       types.JWTSigner,
+		DomainName: clusterName,
+	}, true)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	// Extract the JWT signing key and sign the claims.
+	signer, err := s.GetKeyStore().GetJWTSigner(ca)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	privateKey, err := services.GetJWTSigner(signer, ca.GetClusterName(), s.clock)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	token, err := privateKey.SignPortworx(jwt.SignParams{
+		Username: identity.Username,
+		Email:    identity.Username,
+		Roles:    []string{"system:portworx:view", "system:portworx:admin"},
+		Groups:   []string{"*"},
+		Expires:  identity.Expires,
+	})
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &proto.GeneratePortworxTokenResponse{
+		Token: token,
+	}, nil
+
 }
 
 // generateAppToken generates an JWT token that will be passed along with every

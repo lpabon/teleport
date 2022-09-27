@@ -2955,6 +2955,20 @@ func (g *GRPCServer) GenerateToken(ctx context.Context, req *proto.GenerateToken
 	return &proto.GenerateTokenResponse{Token: token}, nil
 }
 
+func (g *GRPCServer) GeneratePortworxToken(ctx context.Context, req *proto.GeneratePortworxTokenRequest) (*proto.GeneratePortworxTokenResponse, error) {
+	auth, err := g.authenticate(ctx)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	token, err := auth.GeneratePortworxToken(ctx, req)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &proto.GeneratePortworxTokenResponse{Token: token}, nil
+}
+
 // DeleteToken deletes a token by name.
 func (g *GRPCServer) DeleteToken(ctx context.Context, req *types.ResourceRequest) (*empty.Empty, error) {
 	auth, err := g.authenticate(ctx)
