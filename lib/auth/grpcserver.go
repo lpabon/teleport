@@ -2961,12 +2961,7 @@ func (g *GRPCServer) GeneratePortworxToken(ctx context.Context, req *proto.Gener
 		return nil, trace.Wrap(err)
 	}
 
-	token, err := auth.GeneratePortworxToken(ctx, req)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
-	return &proto.GeneratePortworxTokenResponse{Token: token}, nil
+	return auth.GeneratePortworxToken(ctx, req)
 }
 
 // DeleteToken deletes a token by name.
