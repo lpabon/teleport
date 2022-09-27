@@ -2885,3 +2885,7 @@ func (c *Client) UpsertClusterAlert(ctx context.Context, alert types.ClusterAler
 	}, c.callOpts...)
 	return trail.FromGRPC(err)
 }
+
+func (c *Client) GeneratePortworxToken(ctx context.Context, req *proto.GeneratePortworxTokenRequest) (*proto.GeneratePortworxTokenResponse, error) {
+	return c.grpc.GeneratePortworxToken(ctx, &proto.GeneratePortworxTokenRequest{})
+}

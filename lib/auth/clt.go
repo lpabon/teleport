@@ -1461,6 +1461,8 @@ type WebService interface {
 
 // IdentityService manages identities and users
 type IdentityService interface {
+	// GeneratePortworxToken
+	GeneratePortworxToken(context.Context, *proto.GeneratePortworxTokenRequest) (*proto.GeneratePortworxTokenResponse, error)
 	// UpsertOIDCConnector updates or creates OIDC connector
 	UpsertOIDCConnector(ctx context.Context, connector types.OIDCConnector) error
 	// GetOIDCConnector returns OIDC connector information by id
